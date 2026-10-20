@@ -144,3 +144,16 @@ caseSensitiveTest(
     expect(listGameDir(path.join(h.gameDir, "Textures"))).toEqual(["a.dds", "two.dds"]);
   },
 );
+
+caseSensitiveTest(
+  "deploys into a real folder rather than a symlink spelling of it",
+  async ({ makeDeployment }) => {
+    const h = makeDeployment({ files: { "Meshes/a.nif": "mod" } });
+    nodeFs.mkdirSync(path.join(h.gameDir, "meshes"));
+    nodeFs.symlinkSync("meshes", path.join(h.gameDir, "Meshes"));
+
+    const deployed = await h.deploy();
+
+    expect(deployed[0].deployedRelPath).toBe(path.join("meshes", "a.nif"));
+  },
+);

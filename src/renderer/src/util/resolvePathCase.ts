@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import * as path from "node:path";
 
@@ -10,12 +11,18 @@ export type DirEntryCache = Map<string, Promise<Map<string, string>>>;
 function knownEntries(dirPath: string, cache: DirEntryCache): Promise<Map<string, string>> {
   let entries = cache.get(dirPath);
   if (entries === undefined) {
-    entries = readdir(dirPath)
-      .catch(() => [] as string[])
-      .then((names) => {
+    entries = readdir(dirPath, { withFileTypes: true })
+      .catch(() => [] as Dirent[])
+      .then((dirents) => {
         const byLower = new Map<string, string>();
-        // sorted, so every spelling of a name resolves to the same one of its variants
-        for (const name of names.sort()) {
+        // sorted, so every spelling of a name resolves to the same one of its variants, and
+        // a real entry wins over a symlink so recorded paths survive the link's removal
+        const sorted = dirents.sort(
+          (a, b) =>
+            Number(a.isSymbolicLink()) - Number(b.isSymbolicLink()) ||
+            (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+        );
+        for (const { name } of sorted) {
           const lower = name.toLowerCase();
           if (!byLower.has(lower)) {
             byLower.set(lower, name);
