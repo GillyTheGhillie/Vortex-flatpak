@@ -137,6 +137,7 @@ import opn from "./opn";
 import relativeTime, { userFriendlyTime } from "./relativeTime";
 import { resolvePathCase } from "./resolvePathCase";
 import StarterInfo from "./StarterInfo";
+import { windowsUserPath } from "./windowsUserPath";
 // CollectionInstallOutcomeProps: props for the exported collection-install event constructors.
 // ModChangeReason: reason vocabulary referenced by IRemoveModOptions.reason / IEnableOptions.reason.
 export type {
@@ -307,6 +308,7 @@ export {
   UserCanceled,
   userFriendlyTime,
   walk,
+  windowsUserPath,
   withErrorContext,
   withTrackedActivity,
   writeFileAtomic,
