@@ -14,6 +14,7 @@ import type { IState } from "../../types/IState";
 import { getGame, UserCanceled } from "../../util/api";
 import * as fs from "../../util/fs";
 import type { Normalize } from "../../util/getNormalizeFunc";
+import { type DirEntryCache, resolvePathCase } from "../../util/resolvePathCase";
 import { activeGameId } from "../../util/selectors";
 import { truthy } from "../../util/util";
 import type { IDeploymentFailure } from "./actions/session";
@@ -38,7 +39,7 @@ export const BACKUP_TAG = ".vortex_backup";
 const VARIANT_SEPARATOR = "\u0000";
 
 function outputRelPath(file: IDeployedFile): string {
-  return deployedFilePath("", file.target, file.relPath);
+  return deployedFilePath("", file.target, file.relPath, file.deployedRelPath);
 }
 
 async function isAbsent(filePath: string): Promise<boolean> {
@@ -214,22 +215,34 @@ abstract class LinkingActivator implements IDeploymentMethod {
     let removed: string[];
     let sourceChanged: string[];
     let contentChanged: string[];
+    let moved: string[];
+    let total = 0;
+    let vacatedDirs: string[] = [];
 
     this.mDirCache = new Set<string>();
 
-    // unlink all files that were removed or changed
-    ({ added, removed, sourceChanged, contentChanged } = this.diffActivation(
-      context.previousDeployment,
-      context.newDeployment,
-    ));
-    log("debug", "deployment", {
-      added: added.length,
-      removed: removed.length,
-      "source changed": sourceChanged.length,
-      modified: contentChanged.length,
-    });
+    const diff = () => {
+      ({ added, removed, sourceChanged, contentChanged, moved } = this.diffActivation(
+        context.previousDeployment,
+        context.newDeployment,
+      ));
+      log("debug", "deployment", {
+        added: added.length,
+        removed: removed.length,
+        "source changed": sourceChanged.length,
+        modified: contentChanged.length,
+        moved: moved.length,
+      });
+      total =
+        added.length + removed.length + sourceChanged.length + contentChanged.length + moved.length;
+      vacatedDirs = [
+        ...moved.map((key) => context.previousDeployment[key]),
+        ...removed
+          .filter((key) => key.includes(VARIANT_SEPARATOR))
+          .map((key) => context.previousDeployment[key]),
+      ].map((file) => path.dirname(outputRelPath(file)));
+    };
 
-    const total = added.length + removed.length + sourceChanged.length + contentChanged.length;
     let count = 0;
     const progress = () => {
       if (progressCB !== undefined) {
@@ -250,7 +263,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
       failures.push({
         source: file.source,
         relPath: file.relPath,
-        outputPath: path.join(dataPath, file.target || "", file.relPath),
+        outputPath: deployedFilePath(dataPath, file.target, file.relPath, file.deployedRelPath),
       });
     };
 
@@ -263,20 +276,34 @@ abstract class LinkingActivator implements IDeploymentMethod {
     };
 
     return (
-      mapWithConcurrency(
-        removed,
-        (key) =>
-          this.removeDeployedFile(installationPath, dataPath, key, true).catch((err: unknown) => {
-            // these keys are no longer in newDeployment
-            const file = context.previousDeployment[key];
-            log("warn", "failed to remove deployed file", {
-              link: file?.relPath,
-              error: getErrorMessageOrDefault(err),
-            });
-            recordFailure(file);
-          }),
-        50,
-      )
+      this.resolveOutputCase(dataPath)
+        // unlink all files that were removed or changed
+        .then(diff)
+        .then(() =>
+          mapWithConcurrency(
+            removed,
+            (key) =>
+              this.removeDeployedFile(installationPath, dataPath, key, true).catch(
+                (err: unknown) => {
+                  // these keys are no longer in newDeployment
+                  const file = context.previousDeployment[key];
+                  log("warn", "failed to remove deployed file", {
+                    link: file?.relPath,
+                    error: getErrorMessageOrDefault(err),
+                  });
+                  recordFailure(file);
+                },
+              ),
+            50,
+          ),
+        )
+        .then(() =>
+          this.unlinkChanged(moved, installationPath, dataPath, onRemoveError, true).then(
+            (keys) => {
+              moved = keys;
+            },
+          ),
+        )
         .then(() =>
           this.unlinkChanged(sourceChanged, installationPath, dataPath, onRemoveError).then(
             (keys) => {
@@ -294,7 +321,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
         // then, (re-)link all files that were added
         .then(() =>
           mapWithConcurrency(
-            added,
+            [...added, ...moved],
             (key) =>
               this.deployFile(key, installationPath, dataPath, false, dirTags)
                 .catch((err: unknown) => {
@@ -333,6 +360,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
             100,
           ),
         )
+        .then(() => this.removeVacatedDirs(dataPath, vacatedDirs))
         .then(() => {
           if (failures.length > 0) {
             this.mApi.store.dispatch(addDeploymentFailures(gameId, failures));
@@ -505,7 +533,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
   }
 
   public isDeployed(installPath: string, dataPath: string, file: IDeployedFile): Promise<boolean> {
-    const fullPath = path.join(dataPath, file.target || "", file.relPath);
+    const fullPath = deployedFilePath(dataPath, file.target, file.relPath, file.deployedRelPath);
 
     return Promise.resolve(
       fs
@@ -526,7 +554,12 @@ abstract class LinkingActivator implements IDeploymentMethod {
     return mapWithConcurrency(
       activation ?? [],
       (fileEntry) => {
-        const fileDataPath = deployedFilePath(dataPath, fileEntry.target, fileEntry.relPath);
+        const fileDataPath = deployedFilePath(
+          dataPath,
+          fileEntry.target,
+          fileEntry.relPath,
+          fileEntry.deployedRelPath,
+        );
         const fileModPath = [installPath, fileEntry.source, fileEntry.relPath].join(path.sep);
         let sourceDeleted: boolean = false;
         let destDeleted: boolean = false;
@@ -588,6 +621,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
                 filePath: fileEntry.relPath,
                 source: fileEntry.source,
                 target: fileEntry.target,
+                deployedRelPath: fileEntry.deployedRelPath,
                 changeType: "srcdeleted",
               });
             } else if (destDeleted && !sourceDeleted) {
@@ -595,6 +629,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
                 filePath: fileEntry.relPath,
                 source: fileEntry.source,
                 target: fileEntry.target,
+                deployedRelPath: fileEntry.deployedRelPath,
                 changeType: "deleted",
               });
             } else if (!sourceDeleted && !destDeleted && !isLink) {
@@ -602,6 +637,7 @@ abstract class LinkingActivator implements IDeploymentMethod {
                 filePath: fileEntry.relPath,
                 source: fileEntry.source,
                 target: fileEntry.target,
+                deployedRelPath: fileEntry.deployedRelPath,
                 sourceTime,
                 destTime,
                 changeType: "refchange",
@@ -742,13 +778,14 @@ abstract class LinkingActivator implements IDeploymentMethod {
     installationPath: string,
     dataPath: string,
     onError: (file: IDeployedFile | undefined, err: unknown) => void,
+    restoreBackup: boolean = false,
   ): Promise<string[]> {
     const failed = new Set<string>();
     await mapWithConcurrency(
       keys,
       (key: string) => {
         const file = this.mContext.newDeployment[key];
-        return this.removeDeployedFile(installationPath, dataPath, key, false).catch(
+        return this.removeDeployedFile(installationPath, dataPath, key, restoreBackup).catch(
           (err: unknown) => {
             onError(file, err);
             failed.add(key);
@@ -769,11 +806,8 @@ abstract class LinkingActivator implements IDeploymentMethod {
     if (this.mContext.previousDeployment[key] === undefined) {
       return Promise.reject(new Error(`failed to remove "${key}"`));
     }
-    const outputPath = path.join(
-      dataPath,
-      this.mContext.previousDeployment[key].target || "",
-      this.mContext.previousDeployment[key].relPath,
-    );
+    const { target, relPath, deployedRelPath } = this.mContext.previousDeployment[key];
+    const outputPath = deployedFilePath(dataPath, target, relPath, deployedRelPath);
     const sourcePath = path.join(
       installationPath,
       this.mContext.previousDeployment[key].source,
@@ -824,13 +858,8 @@ abstract class LinkingActivator implements IDeploymentMethod {
       this.mContext.newDeployment[key].source,
       this.mContext.newDeployment[key].relPath,
     ].join(path.sep);
-    const fullOutputPath = [
-      dataPath,
-      this.mContext.newDeployment[key].target || null,
-      this.mContext.newDeployment[key].relPath,
-    ]
-      .filter((i) => i !== null)
-      .join(path.sep);
+    const { target, relPath, deployedRelPath } = this.mContext.newDeployment[key];
+    const fullOutputPath = deployedFilePath(dataPath, target, relPath, deployedRelPath);
 
     const backupProm: Promise<void> = replace
       ? Promise.resolve()
@@ -857,18 +886,87 @@ abstract class LinkingActivator implements IDeploymentMethod {
       });
   }
 
+  /**
+   * On a case-insensitive target, spell each output path the way its folders already
+   * exist, so the same folder from different mods ends up as one folder on disk.
+   */
+  private async resolveOutputCase(dataPath: string): Promise<void> {
+    if (process.platform === "win32" || this.mNormalize("a") !== this.mNormalize("A")) {
+      return;
+    }
+    const cache: DirEntryCache = new Map();
+    const deployment = this.mContext.newDeployment;
+    for (const [key, file] of Object.entries(deployment)) {
+      if (key.includes(VARIANT_SEPARATOR)) {
+        continue;
+      }
+      const basePath = path.join(dataPath, file.target || "");
+      const outputRelPath = await resolvePathCase(basePath, file.relPath, cache);
+      const resolved: IDeployedFile = { ...file };
+      delete resolved.deployedRelPath;
+      if (outputRelPath !== path.normalize(file.relPath)) {
+        resolved.deployedRelPath = outputRelPath;
+      }
+      deployment[key] = resolved;
+    }
+  }
+
+  /**
+   * Wine uses the folder whose case matches exactly and never looks at its variants, so
+   * an emptied variant would hide the files that moved into its sibling.
+   */
+  private async removeVacatedDirs(dataPath: string, relDirs: string[]): Promise<void> {
+    const dirs = new Set<string>();
+    for (const relDir of relDirs) {
+      for (let dir = relDir; dir !== "." && dir !== path.dirname(dir); dir = path.dirname(dir)) {
+        dirs.add(dir);
+      }
+    }
+    // deepest first, so a parent is checked once its children are gone
+    for (const dir of [...dirs].sort((lhs, rhs) => rhs.length - lhs.length)) {
+      const fullPath = path.join(dataPath, dir);
+      try {
+        const entries = await fs.readdirAsync(fullPath);
+        // only folders Vortex created hold a tag; leave the user's own empty folders alone
+        if (entries.length === 0 || !entries.every((entry) => LinkingActivator.isTagName(entry))) {
+          continue;
+        }
+        await Promise.all(entries.map((entry) => fs.removeAsync(path.join(fullPath, entry))));
+        await fs.rmdirAsync(fullPath);
+      } catch (err) {
+        log("debug", "failed to remove vacated folder", {
+          path: fullPath,
+          error: getErrorMessageOrDefault(err),
+        });
+      }
+    }
+  }
+
   private diffActivation(before: IDeployment, after: IDeployment) {
     const keysBefore = Object.keys(before);
     const keysAfter = Object.keys(after);
     const keysBoth = _.intersection(keysBefore, keysAfter) || [];
+    // a file whose folder takes another case variant is removed and added again, so a
+    // backup at either path is restored or made
+    const moved = keysBoth.filter(
+      (key) => outputRelPath(before[key]) !== outputRelPath(after[key]),
+    );
+    const movedSet = new Set(moved);
+    const sourceChanged = keysBoth.filter(
+      (key: string) => !movedSet.has(key) && before[key]?.source !== after[key]?.source,
+    );
+    const sourceChangedSet = new Set(sourceChanged);
     return {
       added: _.difference(keysAfter, keysBefore),
       removed: _.difference(keysBefore, keysAfter),
-      sourceChanged: keysBoth.filter((key: string) => before[key]?.source !== after[key]?.source),
+      sourceChanged,
       contentChanged: keysBoth.filter(
         (key: string) =>
-          before[key]?.time !== after[key]?.time && before[key]?.source === after[key]?.source,
+          !movedSet.has(key) &&
+          !sourceChangedSet.has(key) &&
+          before[key]?.time !== after[key]?.time,
       ),
+      moved,
     };
   }
 

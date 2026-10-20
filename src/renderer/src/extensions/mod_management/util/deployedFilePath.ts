@@ -7,8 +7,9 @@ export function deployedFilePath(
   basePath: string,
   target: string | undefined,
   relPath: string,
+  deployedRelPath?: string,
 ): string {
-  return path.join(basePath, target || "", relPath);
+  return path.join(basePath, target || "", deployedRelPath ?? relPath);
 }
 
 /** Identifies a deployed file by mod and path; unmerged mods can share a relPath. */

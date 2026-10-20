@@ -16,6 +16,8 @@ export interface IFileChange {
   source: string;
   /** the mod's subfolder, for games that don't merge mods (mergeMods off) */
   target?: string;
+  /** the deployed file's path, when it's spelled differently from filePath */
+  deployedRelPath?: string;
   /**
    * type of change.
    * refchange means that the installed file
@@ -62,6 +64,11 @@ export interface IDeployedFile {
    * in the same directory (mergeMods is true).
    */
   target?: string;
+  /**
+   * the path the file was deployed to, relative to the output directory, when it differs
+   * from relPath: case-insensitive targets reuse the spelling of folders that already exist
+   */
+  deployedRelPath?: string;
   /**
    * the last-modified time of the file. This can be used to determine if the file
    * was changed after deployment

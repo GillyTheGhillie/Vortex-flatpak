@@ -101,7 +101,10 @@ export async function makeDeployedGame(
     saveManifest,
     recordedFiles: async () =>
       (await getManifest(harness.api, "", harness.gameId)).files.map((file) => file.relPath),
-    isDeployed: (file) => existsSync(deployedFilePath(harness.dataPath, file.target, file.relPath)),
+    isDeployed: (file) =>
+      existsSync(
+        deployedFilePath(harness.dataPath, file.target, file.relPath, file.deployedRelPath),
+      ),
   };
 }
 

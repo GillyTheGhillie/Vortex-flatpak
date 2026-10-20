@@ -10,6 +10,8 @@ export interface IFileEntry {
   source: string;
   // the mod's subfolder, for games that don't merge mods (mergeMods off)
   target?: string;
+  // the deployed file's path, when it's spelled differently from filePath
+  deployedRelPath?: string;
   type: "refchange" | "valchange" | "deleted" | "srcdeleted";
   action: FileAction;
   modTypeId: string;

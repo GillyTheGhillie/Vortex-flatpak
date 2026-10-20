@@ -73,7 +73,7 @@ async function applyFileActions(
   );
 
   const deployedPath = (entry: IFileEntry) =>
-    deployedFilePath(outputPath, entry.target, entry.filePath);
+    deployedFilePath(outputPath, entry.target, entry.filePath, entry.deployedRelPath);
 
   // not doing anything with 'nop'. The regular deployment code is responsible for doing the right
   // thing in this case.
@@ -222,6 +222,7 @@ function fileEntry(modTypeId: string, change: IFileChange, action: FileAction): 
     filePath: change.filePath,
     source: change.source,
     target: change.target,
+    deployedRelPath: change.deployedRelPath,
     type: change.changeType,
     action,
     sourceModified: change.sourceTime,

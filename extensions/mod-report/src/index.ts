@@ -129,7 +129,9 @@ async function fileReport(
         try {
           if (generateMD5) {
             md5sum = await conlim.do(async () =>
-              fileMD5(path.join(deployTarget, manifestEntry.relPath)),
+              fileMD5(
+                path.join(deployTarget, manifestEntry.deployedRelPath ?? manifestEntry.relPath),
+              ),
             );
           } else {
             md5sum = "Hash not calculated";

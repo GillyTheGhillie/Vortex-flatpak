@@ -135,6 +135,7 @@ import onceCB from "./onceCB";
 // eslint-disable-next-line no-restricted-imports -- util.opn stays exported to extensions until its deprecation window ends
 import opn from "./opn";
 import relativeTime, { userFriendlyTime } from "./relativeTime";
+import { resolvePathCase } from "./resolvePathCase";
 import StarterInfo from "./StarterInfo";
 // CollectionInstallOutcomeProps: props for the exported collection-install event constructors.
 // ModChangeReason: reason vocabulary referenced by IRemoveModOptions.reason / IEnableOptions.reason.
@@ -283,6 +284,7 @@ export {
   renderModReference,
   resolveCategoryName,
   resolveCategoryPath,
+  resolvePathCase,
   ruleInstallSpec,
   rulePhase,
   runElevated,

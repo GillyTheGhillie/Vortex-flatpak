@@ -137,7 +137,7 @@ export async function filesStillDeployed(
   const present = await Promise.all(
     files.map((file) =>
       limit.do(() =>
-        lstat(deployedFilePath(basePath, file.target, file.relPath)).then(
+        lstat(deployedFilePath(basePath, file.target, file.relPath, file.deployedRelPath)).then(
           // a link left behind is still Vortex's, whatever its target
           (stats) => stats.isSymbolicLink() || isDeployedFile(stats, file),
           (err: unknown) => getErrorCode(err) !== "ENOENT",
@@ -172,7 +172,7 @@ export async function savePurgeLeftovers(
 export function purgeDeployedFiles(basePath: string, files: IDeployedFile[]): Promise<void> {
   return Promise.all(
     files.map((file) => {
-      const fullPath = deployedFilePath(basePath, file.target, file.relPath);
+      const fullPath = deployedFilePath(basePath, file.target, file.relPath, file.deployedRelPath);
       return fs
         .statAsync(fullPath)
         .then((stats) => {

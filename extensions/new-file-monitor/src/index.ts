@@ -170,7 +170,7 @@ async function consolidate(
       const modTypeTree = addToTree(tree, modPaths[modType]);
       if (deployment[modType] !== undefined) {
         deployment[modType].forEach((deployed) => {
-          addToTree(modTypeTree, deployed.relPath, deployed);
+          addToTree(modTypeTree, deployed.deployedRelPath ?? deployed.relPath, deployed);
         });
       }
     }),
