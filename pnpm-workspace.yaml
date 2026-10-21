@@ -254,7 +254,7 @@ catalog:
   tsconfig-paths-webpack-plugin: 4.2.0
   tsdown: 0.22.3
   tsx: 4.23.0
-  turbowalk: github:Nexus-Mods/node-turbowalk#3502f6ffc3f9eb55fe1c9c097b4e4772edce0c0f
+  turbowalk: github:codepuncher/node-turbowalk#02d21950584bf1b74aa44875b18a67c5ef8b2a49
   typescript: 6.0.3
   typescript-eslint: 8.62.1
   universal-analytics: 0.4.23
