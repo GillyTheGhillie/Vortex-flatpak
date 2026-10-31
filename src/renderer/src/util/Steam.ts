@@ -541,7 +541,12 @@ class Steam implements IGameStore {
       exePath,
       args,
     );
-    const protonEnv = buildProtonEnvironment(gameEntry.compatDataPath, steamPath, options.env);
+    const protonEnv = buildProtonEnvironment(
+      gameEntry.compatDataPath,
+      steamPath,
+      gameEntry.gamePath,
+      options.env,
+    );
 
     return api.runExecutable(executable, protonArgs, {
       ...options,

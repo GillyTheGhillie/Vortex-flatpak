@@ -251,6 +251,7 @@ export function isWindowsExecutable(filePath: string): boolean {
 export function buildProtonEnvironment(
   compatDataPath: string,
   steamPath: string,
+  gamePath: string,
   existingEnv?: Record<string, string>,
 ): Record<string, string> {
   const preloads = [
@@ -261,6 +262,9 @@ export function buildProtonEnvironment(
     ...existingEnv,
     STEAM_COMPAT_DATA_PATH: compatDataPath,
     STEAM_COMPAT_CLIENT_INSTALL_PATH: steamPath,
+    // Without these two Proton deletes the s: drive that the prefix's registry points game paths at
+    STEAM_COMPAT_INSTALL_PATH: gamePath,
+    STEAM_COMPAT_LIBRARY_PATHS: path.dirname(path.dirname(gamePath)),
     WINEPREFIX: getWinePrefixPath(compatDataPath),
     LD_PRELOAD: preloads.join(":"),
   };
