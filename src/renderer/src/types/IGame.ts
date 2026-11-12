@@ -180,6 +180,9 @@ export interface IGame extends ITool {
    * better/offer more features if certain details are provided but they are all optional.
    * Extensions should do their best to work without these details, even if it takes more work
    * (during development and potentially at runtime)
+   *
+   * `installRootFolder` (e.g. "Data Files"): archives that wrap the game's mod folder in other
+   * folders are installed relative to it by the default installer. Only games that set it opt in.
    */
   details?: { [key: string]: any };
 

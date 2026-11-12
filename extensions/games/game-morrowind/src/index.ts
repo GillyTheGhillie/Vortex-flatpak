@@ -8,7 +8,6 @@ const walk = require("turbowalk").default;
 
 import { genCollectionsData, parseCollectionsData } from "./collections";
 import { MORROWIND_ID } from "./constants";
-import { installDataFiles, testDataFiles } from "./installers";
 import { deserializeLoadOrder, serializeLoadOrder } from "./loadorder";
 import { migrate103 } from "./migrations";
 import { IExtendedInterfaceProps } from "./types/types";
@@ -172,10 +171,10 @@ function main(context: types.IExtensionContext) {
     details: {
       steamAppId: parseInt(STEAMAPP_ID, 10),
       gogAppId: GOG_ID,
+      // mods are packed with the "Data Files" folder kept inside a wrapper folder
+      installRootFolder: "Data Files",
     },
   });
-
-  context.registerInstaller("morrowind-data-files", 25, testDataFiles, installDataFiles);
 
   context.registerLoadOrder({
     gameId: MORROWIND_ID,

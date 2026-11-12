@@ -23,6 +23,18 @@ This repository is a community modification of [Nexus Mods Vortex](https://githu
 
 The original project is licensed under the [GNU General Public License v3.0](LICENSE.md). That license permits modification and redistribution subject to its terms. Please retain the original copyright and license notices and provide the corresponding source when redistributing. Vortex and its original code are credited to Nexus Mods and the upstream contributors; this fork's changes are maintained by GillyTheGhillie.
 
+### Credits
+
+**Enkari (codepuncher)** wrote the Linux compatibility fixes merged into this fork, including case-insensitive deployment, Proton path handling and plugin lookup. Those commits keep Enkari's authorship in the git history. Enkari's work remains Enkari's, under the same GPL-3.0 license as the rest of Vortex.
+
+- GitHub: [codepuncher](https://github.com/codepuncher/)
+- Repository: [codepuncher/Vortex](https://github.com/codepuncher/Vortex/) (branch `chore/linux-all-fixes`)
+- Nexus Mods: [Enkari](https://www.nexusmods.com/profile/Enkari)
+
+Enkari is not involved in this fork's other changes. **Please don't contact Enkari about issues with this fork**; report them on this repository instead.
+
+The other changes in this fork, including the Flatpak packaging and the Morrowind data-files installer, were developed with AI coding assistance and are maintained by GillyTheGhillie.
+
 ## Features
 
 - **Multi-game Support** - with mod support for over 250 different games and counting, Vortex is the most versatile mod manager available. This includes games such as [Skyrim](https://www.nexusmods.com/skyrimspecialedition), [Fallout 3](https://www.nexusmods.com/fallout3), [Fallout 4](https://www.nexusmods.com/fallout4), [Fallout: New Vegas](https://www.nexusmods.com/newvegas/), [Cyberpunk 2077](https://www.nexusmods.com/cyberpunk2077/), [Baldur's Gate 3](https://www.nexusmods.com/baldursgate3/), [Starfield](https://www.nexusmods.com/starfield/), [Stardew Valley](https://www.nexusmods.com/stardewvalley/), [Bannerlord](https://www.nexusmods.com/mountandblade2bannerlord), [Witcher 3](https://www.nexusmods.com/witcher3), [Elden Ring](https://www.nexusmods.com/eldenring), [The Sims 4](https://www.nexusmods.com/thesims4), [Monster Hunter: World](https://www.nexusmods.com/monsterhunterworld), [Oblivion](https://www.nexusmods.com/oblivion), [Palworld](https://www.nexusmods.com/palworld), [Blade & Sorcery](https://www.nexusmods.com/bladeandsorcery), [Valheim](https://www.nexusmods.com/valheim), [Hogwarts Legacy](https://www.nexusmods.com/hogwartslegacy/), [7 Days to Die](https://www.nexusmods.com/7daystodie/).
