@@ -26,6 +26,10 @@ const LAUNCHER_KEYS = [
 /** The launcher's data folder, holding the Manifests folder, or undefined when no
  * install is registered. */
 export function findEpicDataPath(): string | undefined {
+  if (process.platform !== "win32") {
+    return undefined;
+  }
+
   let lastError: unknown;
   for (const key of LAUNCHER_KEYS) {
     try {

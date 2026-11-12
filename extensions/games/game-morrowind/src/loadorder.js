@@ -1,8 +1,119 @@
 const path = require("path");
 const { fs, selectors, util } = require("@nexusmods/vortex-api");
-const { default: IniParser, WinapiFormat } = require("vortex-parse-ini");
 
 const { MORROWIND_ID } = require("./constants");
+
+function splitIniLines(contents) {
+  const lines = [];
+  let start = 0;
+  while (start < contents.length) {
+    let end = start;
+    while (end < contents.length && contents[end] !== "\r" && contents[end] !== "\n") {
+      end += 1;
+    }
+    if (end < contents.length) {
+      end += contents[end] === "\r" && contents[end + 1] === "\n" ? 2 : 1;
+    }
+    lines.push(contents.slice(start, end));
+    start = end;
+  }
+  return lines;
+}
+
+function lineContent(line) {
+  return line.replace(/(?:\r\n|\n|\r)$/, "").replace(/^\uFEFF/, "");
+}
+
+function sectionHeader(line) {
+  return /^\s*\[([^\]]+)\]\s*$/.exec(lineContent(line));
+}
+
+function gameFilesFromContents(contents) {
+  const files = {};
+  let inGameFiles = false;
+  for (const line of splitIniLines(contents)) {
+    const header = sectionHeader(line);
+    if (header !== null) {
+      inGameFiles = header[1].trim().toLowerCase() === "game files";
+    } else if (inGameFiles) {
+      const equals = lineContent(line).indexOf("=");
+      if (equals !== -1) {
+        files[lineContent(line).slice(0, equals).trim()] = lineContent(line)
+          .slice(equals + 1)
+          .trim();
+      }
+    }
+  }
+  return Object.keys(files)
+    .filter((key) => /^GameFile\d+$/i.test(key))
+    .sort(
+      (lhs, rhs) =>
+        Number.parseInt(lhs.replace(/^GameFile/i, ""), 10) -
+        Number.parseInt(rhs.replace(/^GameFile/i, ""), 10),
+    )
+    .map((key) => files[key]);
+}
+
+function withGameFiles(contents, plugins) {
+  const lines = splitIniLines(contents);
+  let sectionStart = -1;
+  let sectionEnd = lines.length;
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const header = sectionHeader(lines[idx]);
+    if (header === null) {
+      continue;
+    }
+    if (sectionStart !== -1) {
+      sectionEnd = idx;
+      break;
+    }
+    if (header[1].trim().toLowerCase() === "game files") {
+      sectionStart = idx;
+    }
+  }
+
+  const newline = (contents.match(/\r\n|\n|\r/) || ["\r\n"])[0];
+  if (sectionStart === -1) {
+    const separator = contents.length === 0 || /(?:\r\n|\n|\r)$/.test(contents) ? "" : newline;
+    return (
+      contents +
+      separator +
+      `[Game Files]${newline}` +
+      plugins.map((plugin, idx) => `GameFile${idx}=${plugin}${newline}`).join("")
+    );
+  }
+
+  const sectionLines = lines.slice(sectionStart + 1, sectionEnd);
+  const firstGameFile = sectionLines.findIndex((line) =>
+    /^\s*GameFile\d+\s*=/i.test(lineContent(line)),
+  );
+  const insertionPoint =
+    firstGameFile === -1
+      ? sectionLines.length
+      : sectionLines
+          .slice(0, firstGameFile)
+          .filter((line) => !/^\s*GameFile\d+\s*=/i.test(lineContent(line))).length;
+  const retained = sectionLines.filter(
+    (line) => !/^\s*GameFile\d+\s*=/i.test(lineContent(line)),
+  );
+  const sectionNewline =
+    firstGameFile !== -1
+      ? sectionLines[firstGameFile].match(/(?:\r\n|\n|\r)$/)?.[0] || newline
+      : lines[sectionStart].match(/(?:\r\n|\n|\r)$/)?.[0] || newline;
+  if (
+    plugins.length > 0 &&
+    !/(?:\r\n|\n|\r)$/.test(lines[sectionStart])
+  ) {
+    lines[sectionStart] += sectionNewline;
+  }
+  retained.splice(
+    insertionPoint,
+    0,
+    ...plugins.map((plugin, idx) => `GameFile${idx}=${plugin}${sectionNewline}`),
+  );
+  lines.splice(sectionStart + 1, sectionEnd - sectionStart - 1, ...retained);
+  return lines.join("");
+}
 
 async function deserializeLoadOrder(api, mods = undefined) {
   const state = api.getState();
@@ -74,21 +185,14 @@ async function refreshPlugins(api) {
 }
 
 async function readGameFiles(iniFilePath) {
-  const parser = new IniParser(new WinapiFormat());
-  return parser.read(iniFilePath).then((ini) => {
-    const files = ini.data["Game Files"];
-    return Object.keys(files ?? {}).map((key) => files[key]);
-  });
+  const contents = await fs.readFileAsync(iniFilePath, { encoding: "utf8" });
+  return gameFilesFromContents(contents);
 }
 
 async function updatePluginOrder(iniFilePath, plugins) {
-  const parser = new IniParser(new WinapiFormat());
-  return parser.read(iniFilePath).then((ini) => {
-    ini.data["Game Files"] = plugins.reduce((prev, plugin, idx) => {
-      prev[`GameFile${idx}`] = plugin;
-      return prev;
-    }, {});
-    return parser.write(iniFilePath, ini);
+  const contents = await fs.readFileAsync(iniFilePath, { encoding: "utf8" });
+  await fs.writeFileAsync(iniFilePath, withGameFiles(contents, plugins), {
+    encoding: "utf8",
   });
 }
 

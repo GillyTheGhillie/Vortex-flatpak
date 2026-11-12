@@ -26,19 +26,24 @@ describe("findEpicDataPath", () => {
     registry.clear();
   });
 
-  it("reads the 64-bit key a current launcher install writes", () => {
+  it.runIf(process.platform === "win32")("reads the 64-bit key a current launcher install writes", () => {
     registry.set(KEY_64, "C:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\");
 
     expect(findEpicDataPath()).toBe("C:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\");
   });
 
-  it("falls back to the 32-bit key an older launcher install wrote", () => {
+  it.runIf(process.platform === "win32")("falls back to the 32-bit key an older launcher install wrote", () => {
     registry.set(KEY_32, "D:\\Epic\\Data\\");
 
     expect(findEpicDataPath()).toBe("D:\\Epic\\Data\\");
   });
 
-  it("is undefined when the launcher isn't installed", () => {
+  it.runIf(process.platform === "win32")("is undefined when the launcher isn't installed", () => {
+    expect(findEpicDataPath()).toBeUndefined();
+  });
+
+  it.runIf(process.platform !== "win32")("is undefined on non-Windows platforms", () => {
+    registry.set(KEY_64, "C:\\ProgramData\\Epic\\EpicGamesLauncher\\Data\\");
     expect(findEpicDataPath()).toBeUndefined();
   });
 });

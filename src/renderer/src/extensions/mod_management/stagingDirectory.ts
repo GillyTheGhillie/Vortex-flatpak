@@ -142,16 +142,18 @@ async function ensureStagingDirectoryImpl(
   }
 
   let partitionExists = true;
-  try {
-    winapi.GetVolumePathName(instPath);
-  } catch (err) {
-    // On Windows, error number 2 (0x2) translates to ERROR_FILE_NOT_FOUND.
-    //  the only way for this error to be reported at this point is when
-    //  the destination path is pointing towards a non-existing partition.
-    // If it's a non-existing partition, we want the reinitialization dialog
-    //  to appear so that the user can re-configure his game's staging folder.
-    if (isErrorWithSystemCode(err) && err.systemCode === 2) {
-      partitionExists = false;
+  if (process.platform === "win32") {
+    try {
+      winapi.GetVolumePathName(instPath);
+    } catch (err) {
+      // On Windows, error number 2 (0x2) translates to ERROR_FILE_NOT_FOUND.
+      //  the only way for this error to be reported at this point is when
+      //  the destination path is pointing towards a non-existing partition.
+      // If it's a non-existing partition, we want the reinitialization dialog
+      //  to appear so that the user can re-configure his game's staging folder.
+      if (isErrorWithSystemCode(err) && err.systemCode === 2) {
+        partitionExists = false;
+      }
     }
   }
   let dirExists = false;

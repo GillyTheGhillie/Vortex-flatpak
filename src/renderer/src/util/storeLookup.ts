@@ -78,6 +78,10 @@ export async function registryLookup(lookup: string): Promise<IGameStoreEntry> {
     throw new Error("invalid store query, provide an id!");
   }
 
+  if (process.platform !== "win32") {
+    throw new GameEntryNotFound(lookup, "registry");
+  }
+
   const chunked = lookup.split(":", 3);
 
   if (chunked.length !== 3) {
@@ -257,6 +261,10 @@ async function launchStoreAsync(
 }
 
 function isStoreRunning(storeExecPath: string) {
+  if (process.platform !== "win32") {
+    return false;
+  }
+
   const runningProcesses = winapi.GetProcessList();
   const exeId = makeExeId(storeExecPath);
   return (

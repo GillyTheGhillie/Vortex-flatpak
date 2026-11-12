@@ -7,11 +7,14 @@ import type { IGameStore } from "../types/IGameStore";
 import type { IGameStoreEntry } from "../types/IGameStoreEntry";
 import * as storeLookup from "./storeLookup";
 
+const getProcessList = vi.hoisted(() => vi.fn(() => []));
+const regGetValue = vi.hoisted(() => vi.fn(() => {
+  throw new Error("no registry in tests");
+}));
+
 vi.mock("winapi-bindings", () => ({
-  RegGetValue: () => {
-    throw new Error("no registry in tests");
-  },
-  GetProcessList: () => [],
+  RegGetValue: regGetValue,
+  GetProcessList: getProcessList,
 }));
 
 const entry = (gameStoreId: string, appid: string, name: string): IGameStoreEntry => ({
@@ -43,6 +46,7 @@ describe("storeLookup.findByAppId", () => {
   let stores: IGameStore[];
 
   beforeEach(() => {
+    getProcessList.mockClear();
     stores = [
       makeStore("steam", [entry("steam", "720", "Steam Game")]),
       makeStore("epic", [entry("epic", "epic-app", "Epic Game")]),
@@ -79,6 +83,19 @@ describe("storeLookup.findByAppId", () => {
   it("supports array app ids", async () => {
     const res = await storeLookup.findByAppId(stores, ["99999", "720"]);
     expect(res.appid).toBe("720");
+  });
+});
+
+describe("storeLookup.registryLookup", () => {
+  beforeEach(() => {
+    regGetValue.mockClear();
+  });
+
+  it.runIf(process.platform !== "win32")("does not call the Windows registry", async () => {
+    await expect(storeLookup.registryLookup("HKEY_LOCAL_MACHINE:Software:Game")).rejects.toThrow(
+      GameEntryNotFound,
+    );
+    expect(regGetValue).not.toHaveBeenCalled();
   });
 });
 
@@ -210,6 +227,9 @@ describe("storeLookup.launchGameStore", () => {
       detach: true,
       suggestDeploy: false,
     });
+    if (process.platform !== "win32") {
+      expect(getProcessList).not.toHaveBeenCalled();
+    }
   });
 
   it("reports a failing store launch chain via notification only", async () => {

@@ -44,6 +44,8 @@ const tools = [
 ];
 
 async function findRegistryGame(key: string): Promise<types.IGameStoreEntry | undefined> {
+  if (process.platform !== "win32") return undefined;
+
   const instPath = winapi.RegGetValue("HKEY_LOCAL_MACHINE", key, "Installed Path");
   if (instPath.type !== "REG_SZ") return undefined;
   const gamePath = instPath.value as string;
