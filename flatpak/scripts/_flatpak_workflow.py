@@ -46,14 +46,13 @@ def resolve_flatpak_paths(build_dir: str, manifest: str, repo: str) -> FlatpakPa
 
 def sync_flatpak_build_inputs(root: Path) -> None:
     sync_generated_sources(
-        lockfile=root / "yarn.lock",
+        lockfile=root / "pnpm-lock.yaml",
         output=root / "flatpak/generated-sources.json",
         hash_file=root / "flatpak/generated-sources.hash",
-        recursive=True,
     )
 
     sync_generated_nuget_sources(
-        search_root=root / "extensions",
+        search_root=root / "tools/dotnetprobe",
         projects=None,
         output=root / "flatpak/generated-nuget-sources.json",
         hash_file=root / "flatpak/generated-nuget-sources.hash",
@@ -74,8 +73,12 @@ def run_flatpak_builder(
     repo_dir: Optional[Path] = None,
     install_deps_from: Optional[str] = None,
     user_install: bool = False,
+    disable_rofiles_fuse: bool = False,
 ) -> None:
     cmd = ["flatpak-builder", "--force-clean"]
+
+    if disable_rofiles_fuse:
+        cmd.append("--disable-rofiles-fuse")
 
     if repo_dir is not None:
         cmd.extend(["--repo", str(repo_dir)])

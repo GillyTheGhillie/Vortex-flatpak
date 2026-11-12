@@ -1,29 +1,39 @@
 #!/usr/bin/env python3
-"""Generate and sync Flatpak source manifests for yarn and NuGet inputs."""
+"""Generate and sync Flatpak source manifests for pnpm and NuGet inputs."""
 
 import argparse
+import hashlib
+import json
+import re
+import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Iterable, List, Optional
 
-from _flatpak_env import ensure_venv, repo_root, run_command
+from _flatpak_env import (
+    ensure_flatpak_ref,
+    ensure_flathub_remote,
+    ensure_venv,
+    repo_root,
+    run_command,
+)
 from _flatpak_nuget_hash import (
     collect_nuget_input_files,
     compute_nuget_sources_hash,
     read_stored_hash as read_nuget_stored_hash,
     write_stored_hash as write_nuget_stored_hash,
 )
-from _flatpak_yarn_hash import (
-    collect_lockfiles,
+from _flatpak_pnpm_hash import (
     compute_sources_hash,
     read_stored_hash as read_sources_stored_hash,
     write_stored_hash as write_sources_stored_hash,
 )
 
 
-DEFAULT_LOCKFILE = "yarn.lock"
-DEFAULT_YARN_OUTPUT = "flatpak/generated-sources.json"
-DEFAULT_YARN_HASH_FILE = "flatpak/generated-sources.hash"
-DEFAULT_NUGET_SEARCH_ROOT = "extensions"
+DEFAULT_LOCKFILE = "pnpm-lock.yaml"
+DEFAULT_PNPM_OUTPUT = "flatpak/generated-sources.json"
+DEFAULT_PNPM_HASH_FILE = "flatpak/generated-sources.hash"
+DEFAULT_NUGET_SEARCH_ROOT = "tools/dotnetprobe"
 DEFAULT_NUGET_OUTPUT = "flatpak/generated-nuget-sources.json"
 DEFAULT_NUGET_HASH_FILE = "flatpak/generated-nuget-sources.hash"
 DEFAULT_DOTNET = "9"
@@ -35,35 +45,118 @@ DEFAULT_RUNTIME = "linux-x64"
 def generate_sources(
     lockfile: Path,
     output: Path,
-    recursive: bool,
-    lockfiles: Optional[List[Path]] = None,
 ) -> None:
     info = ensure_venv(install_packages=True)
 
     root = repo_root()
 
-    cmd = [
-        str(info.flatpak_node_generator),
-        "yarn",
-        str(lockfile),
-        "-o",
-        str(output),
-    ]
-    if recursive:
-        if lockfiles is None:
-            lockfiles = collect_lockfiles(lockfile=lockfile, recursive=True)
-        cmd.append("-r")
-        for lockfile_path in lockfiles:
-            cmd.extend(["-R", str(lockfile_path)])
+    with tempfile.NamedTemporaryFile(
+        dir=root, prefix=".flatpak-pnpm-lock-", suffix=".yaml", delete=False
+    ) as temporary:
+        generation_lockfile = Path(temporary.name)
 
-    run_command(cmd, cwd=root)
+    try:
+        run_command(
+            [
+                str(info.python_exe),
+                str(Path(__file__).with_name("_flatpak_pnpm_lock.py")),
+                str(lockfile),
+                str(generation_lockfile),
+            ],
+            cwd=root,
+        )
+
+        run_command(
+            [
+                str(info.flatpak_node_generator),
+                "pnpm",
+                str(generation_lockfile),
+                "-o",
+                str(output),
+                "--pnpm-store-version",
+                "v11",
+            ],
+            cwd=root,
+        )
+
+        duckdb_sources = _duckdb_extension_sources(lockfile)
+        generated_sources = json.loads(output.read_text(encoding="utf-8"))
+        generated_sources.extend(duckdb_sources)
+        output.write_text(
+            json.dumps(generated_sources, indent=4) + "\n",
+            encoding="utf-8",
+        )
+    finally:
+        generation_lockfile.unlink(missing_ok=True)
+
+
+def _duckdb_extension_sources(lockfile: Path) -> List[dict]:
+    root = repo_root()
+    lock_contents = lockfile.read_text(encoding="utf-8")
+    version_match = re.search(
+        r"^  '@duckdb/node-api@(\d+\.\d+\.\d+)-r\.\d+':$",
+        lock_contents,
+        re.MULTILINE,
+    )
+    if version_match is None:
+        raise ValueError(f"{lockfile}: could not find the DuckDB Node API version")
+    version = f"v{version_match.group(1)}"
+
+    config_path = root / "src/main/duckdb-extensions.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    platforms = [
+        platform for platform in config["platforms"] if platform.startswith("linux_")
+    ]
+    if not platforms:
+        raise ValueError(f"{config_path}: no Linux DuckDB platform is configured")
+
+    sources = []
+    for extension in config["extensions"]:
+        name = extension["name"]
+        extension_type = extension["type"]
+        if extension_type == "community":
+            base_url = "https://community-extensions.duckdb.org"
+        elif extension_type == "http":
+            base_url = extension.get("repository")
+            if not base_url:
+                raise ValueError(
+                    f"{config_path}: HTTP extension {name} has no repository"
+                )
+        else:
+            raise ValueError(
+                f"{config_path}: unsupported extension type {extension_type}"
+            )
+
+        for platform in platforms:
+            url = (
+                f"{base_url.rstrip('/')}/{version}/{platform}/"
+                f"{name}.duckdb_extension.gz"
+            )
+            checksum = hashlib.sha256()
+            with urllib.request.urlopen(url) as response:
+                while chunk := response.read(1024 * 1024):
+                    checksum.update(chunk)
+
+            sources.append(
+                {
+                    "type": "file",
+                    "url": url,
+                    "sha256": checksum.hexdigest(),
+                    "dest": "flatpak-node/duckdb-extensions",
+                    "dest-filename": (
+                        f"{name}-{platform}.duckdb_extension.gz"
+                    ),
+                    "only-arches": ["x86_64"],
+                }
+            )
+
+    return sources
 
 
 def sync_generated_sources(
     lockfile: Path,
     output: Path,
     hash_file: Path,
-    recursive: bool = True,
     force: bool = False,
 ) -> bool:
     root = repo_root()
@@ -74,9 +167,7 @@ def sync_generated_sources(
     if not hash_file.is_absolute():
         hash_file = root / hash_file
 
-    source_hash, lockfiles = compute_sources_hash(
-        lockfile=lockfile, recursive=recursive
-    )
+    source_hash, lockfile = compute_sources_hash(lockfile=lockfile)
     stored_hash = read_sources_stored_hash(hash_file)
 
     if not force and output.exists() and stored_hash == source_hash:
@@ -95,8 +186,6 @@ def sync_generated_sources(
     generate_sources(
         lockfile=lockfile,
         output=output,
-        recursive=recursive,
-        lockfiles=lockfiles,
     )
     write_sources_stored_hash(hash_file=hash_file, value=source_hash)
     print(f"Updated Flatpak sources hash: {hash_file}")
@@ -131,6 +220,43 @@ def generate_nuget_sources(
 ) -> None:
     info = ensure_venv(install_packages=True)
     root = repo_root()
+
+    ensure_flathub_remote()
+    ensure_flatpak_ref(f"org.freedesktop.Sdk//{freedesktop}")
+    ensure_flatpak_ref(f"org.freedesktop.Sdk.Extension.dotnet{dotnet}//{freedesktop}")
+
+    with tempfile.TemporaryDirectory(prefix="flatpak-nuget-restore-") as temp_dir:
+        temp_path = Path(temp_dir)
+        obj_dir = temp_path / "obj"
+        for project in projects:
+            run_command(
+                [
+                    "flatpak",
+                    "run",
+                    "--env=DOTNET_CLI_TELEMETRY_OPTOUT=true",
+                    "--env=DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true",
+                    "--command=sh",
+                    f"--runtime=org.freedesktop.Sdk//{freedesktop}",
+                    "--share=network",
+                    "--filesystem=host",
+                    f"org.freedesktop.Sdk.Extension.dotnet{dotnet}//{freedesktop}",
+                    "-c",
+                    (
+                        f'PATH="${{PATH}}:/usr/lib/sdk/dotnet{dotnet}/bin" '
+                        f'LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib/sdk/dotnet{dotnet}/lib" '
+                        'exec dotnet restore "$@"'
+                    ),
+                    "--",
+                    "--packages",
+                    str(temp_path / "packages"),
+                    str(project),
+                    "--runtime",
+                    runtime,
+                    f"-p:BaseIntermediateOutputPath={obj_dir}/",
+                    f"-p:MSBuildProjectExtensionsPath={obj_dir}/",
+                ],
+                cwd=root,
+            )
 
     cmd = [
         str(info.python_exe),
@@ -218,7 +344,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--only",
-        choices=("all", "yarn", "nuget"),
+        choices=("all", "pnpm", "nuget"),
         default="all",
         help="Select which source types to sync (default: all)",
     )
@@ -250,15 +376,14 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_parser().parse_args()
 
-    run_yarn = args.only in {"all", "yarn"}
+    run_pnpm = args.only in {"all", "pnpm"}
     run_nuget = args.only in {"all", "nuget"}
 
-    if run_yarn:
+    if run_pnpm:
         sync_generated_sources(
             lockfile=Path(DEFAULT_LOCKFILE),
-            output=Path(DEFAULT_YARN_OUTPUT),
-            hash_file=Path(DEFAULT_YARN_HASH_FILE),
-            recursive=True,
+            output=Path(DEFAULT_PNPM_OUTPUT),
+            hash_file=Path(DEFAULT_PNPM_HASH_FILE),
             force=args.force,
         )
 

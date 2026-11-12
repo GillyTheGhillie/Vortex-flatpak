@@ -20,17 +20,13 @@ build-options:
     # Ref: https://github.com/electron/electron/blob/main/docs/api/environment-variables.md
     ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
-    # Node/Yarn offline cache locations for reproducible builds.
+    # Node/pnpm offline cache locations for reproducible builds.
     # Flatpak builds run offline by default; these paths are inside the build sandbox.
     # Ref: https://docs.flatpak.org/en/latest/electron.html#the-application-module
     npm_config_cache: /run/build/vortex/flatpak-node/npm-cache
     npm_config_nodedir: /usr/lib/sdk/node24
     npm_config_offline: "true"
     XDG_CACHE_HOME: /run/build/vortex/flatpak-node/cache
-    YARN_CACHE_FOLDER: /run/build/vortex/flatpak-node/yarn-cache
-    YARN_IGNORE_ENGINES: "1"
-    YARN_OFFLINE_MIRROR: /run/build/vortex/flatpak-node/yarn-mirror
-    YARN_OFFLINE_MIRROR_PRUNING: "false"
 
     # Dotnet SDK settings for build-time tools (runtime DOTNET_ROOT is set via finish-args).
     DOTNET_CLI_TELEMETRY_OPTOUT: "1"
@@ -39,6 +35,11 @@ build-options:
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
 
     # Build stability: avoid parallel extension builds.
+    NODE_OPTIONS: --v8-pool-size=1
+    RAYON_NUM_THREADS: "1"
+    TOKIO_WORKER_THREADS: "1"
+    UV_THREADPOOL_SIZE: "1"
+    NX_DAEMON: "false"
     # Skip git submodule updates (submodules are already fetched by flatpak-builder).
     # FOMOD installer builds are still needed and run during preinstall.
     NO_PARALLEL: "1"
@@ -82,8 +83,6 @@ modules:
     build-commands:
       # Steps match `.github/workflows/package.yml` where possible.
 
-      # Configure Yarn for Flatpak caches, then install dependencies.
-      - cp flatpak/yarnrc .yarnrc
       - |
         cat > NuGet.Config <<'EOF'
         <?xml version="1.0" encoding="utf-8"?>
@@ -94,19 +93,100 @@ modules:
           </packageSources>
         </configuration>
         EOF
-      - yarn install --non-interactive --check-files --frozen-lockfile
-      # Build the app following the standard workflow from CONTRIBUTING.md.
-      - yarn run build
+        cat > tools/dotnetprobe/nuget.config <<'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <packageSources>
+            <clear />
+            <add key="offline" value="../../flatpak-nuget-sources" />
+          </packageSources>
+        </configuration>
+        EOF
+      # The Node SDK extension does not include pnpm. Bootstrap the exact
+      # lockfile-pinned pnpm CLI from the generated offline sources.
+      - |
+        set -eu
+        pnpm_version="$(node -p "require('./package.json').packageManager.match(/^pnpm@([^+]+)/)[1]")"
+        mkdir -p .flatpak-pnpm
+        tar -xzf "flatpak-node/pnpm-tarballs/pnpm-$pnpm_version.tgz" \
+          --strip-components=1 -C .flatpak-pnpm
+        cat > .flatpak-pnpm/bin/pnpm <<'SH'
+        #!/bin/sh
+        exec node "$(dirname "$0")/pnpm.cjs" "$@"
+        SH
+        chmod +x .flatpak-pnpm/bin/pnpm
+        export PATH="$PWD/.flatpak-pnpm/bin:$PATH"
 
-      # Prepare app/ directory for packaging
-      - yarn run _install_app
-      - yarn run subprojects_app
-      - yarn run _assets_app
-      - yarn run build_dist
+        # Use the exact Node version provided by the SDK instead of downloading
+        # the runtime package during the offline install.
+        node - <<'NODE'
+        const fs = require('node:fs');
+        const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+        for (const section of ['engines', 'devEngines']) {
+          if (packageJson[section]?.runtime) {
+            packageJson[section].runtime.onFail = 'ignore';
+          }
+        }
+        fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2) + '\n');
+        NODE
 
-      # Build Electron distribution with electron-builder (dir target)
-      # This creates dist/linux-unpacked/ with the electron binary bundled
-      - yarn electron-builder --config electron-builder-config.json --publish never --linux dir
+        # Drop the SDK-provided runtime dependency from the build-only lockfile.
+        node flatpak/scripts/_flatpak_pnpm_build_lock.cjs
+        VORTEX_ELECTRON_REBUILD=defer node .flatpak-pnpm/bin/pnpm.cjs install --offline --frozen-lockfile --trust-lockfile
+        export PATH="$PWD/node_modules/.pnpm/node_modules/.bin:$PWD/src/main/node_modules/.bin:$PWD/node_modules/.bin:$PATH"
+        node src/main/node_modules/@nexusmods/fomod-installer-native/install.js
+        test -f src/main/node_modules/@nexusmods/fomod-installer-native/ModInstaller.Native.so
+        (cd src/main && pnpm exec electron-rebuild --only @nexusmods/fomod-installer-native,drivelist,leveldown,xxhash-addon,@parcel/watcher --sequential)
+        electron_version="$(node -p "require('./src/main/node_modules/electron/package.json').version")"
+        src/main/node_modules/.bin/electron-rebuild \
+          --module-dir extensions/theme-switcher \
+          --version "$electron_version" \
+          --only font-scanner --types dev --sequential
+
+        # Stage the Linux DuckDB extension from the offline source manifest.
+        duckdb_version="$(node -p "require('./src/main/node_modules/@duckdb/node-api/package.json').version.match(/^(\d+\.\d+\.\d+)-r\.\d+$/)[1]")"
+        duckdb_version="v$duckdb_version"
+        mkdir -p "src/main/build/duckdb-extensions/$duckdb_version/linux_amd64"
+        gzip -dc flatpak-node/duckdb-extensions/level_pivot-linux_amd64.duckdb_extension.gz \
+          > "src/main/build/duckdb-extensions/$duckdb_version/linux_amd64/level_pivot.duckdb_extension"
+        node - <<'NODE'
+        const fs = require('node:fs');
+        const configPath = 'src/main/duckdb-extensions.json';
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        config.platforms = config.platforms.filter(platform => platform === 'linux_amd64');
+        if (config.platforms.length !== 1) {
+          throw new Error('Expected the Linux x86_64 DuckDB platform');
+        }
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+        NODE
+
+        # Build targets only; lint and typecheck run in the regular CI pipeline.
+        node .flatpak-pnpm/bin/pnpm.cjs nx run-many -t build --parallel=1
+        node - <<'NODE'
+        const fs = require('node:fs');
+        const packagePath = 'src/main/package.json';
+        const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+        const expected = 'pnpm -F @vortex/main deploy ./dist';
+        if (!packageJson.scripts.publish?.includes(expected)) {
+          throw new Error(`Expected publish script to include "${expected}"`);
+        }
+        packageJson.scripts.publish = packageJson.scripts.publish.replace(
+          expected,
+          'pnpm -F @vortex/main deploy --offline --trust-lockfile ./dist',
+        );
+        fs.writeFileSync(packagePath, JSON.stringify(packageJson, null, 2) + '\n');
+        NODE
+        NODE_ENV=production node .flatpak-pnpm/bin/pnpm.cjs nx run @vortex/main:publish
+
+        # Rebuild the deployed native modules for Electron, then stage a
+        # directory build of the application.
+        (
+          cd src/main/dist
+          PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false pnpm exec electron-rebuild --sequential
+          pnpm exec electron-builder \
+            --config electron-builder.config.json \
+            --publish never --linux dir
+        )
 
       # Install the launcher, desktop file, icon, and metainfo into the Flatpak image.
       - install -Dm755 flatpak/run.sh /app/bin/run.sh

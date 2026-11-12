@@ -1,0 +1,8 @@
+FROM fedora:45
+
+RUN dnf -y install flatpak-builder git python3-pip tar \
+    && dnf clean all
+
+WORKDIR /workspace
+
+CMD ["python3", "flatpak/scripts/flatpak_build.py", "--disable-rofiles-fuse"]

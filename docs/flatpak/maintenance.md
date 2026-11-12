@@ -2,15 +2,19 @@
 
 How to build and update the Flatpak package.
 
-> [!WARNING]
+> [!IMPORTANT]
 >
-> ## IMPORTANT: PNPM LOCKFILES ARE NOT SUPPORTED IN FLATPAK-BUILDER-TOOLS YET
+> ## pnpm lockfiles are supported
 >
-> Flatpak dependency source generation still relies on compatibility lockfiles
-> such as npm and Yarn, not `pnpm-lock.yaml`.
+> [flatpak-builder-tools PR 511] added pnpm lockfile support and was merged on
+> March 12, 2026, completing [upstream issue 383]. Upstream subsequently added
+> [pnpm v11] and [pnpm v12] store support. Vortex now generates its offline
+> dependency sources from `pnpm-lock.yaml` using the pnpm v11 store format.
 >
-> - [Flatpak Builder Tools PR 511]
-> - [Flatpak Builder Tools issue 383]
+> The build uses the Node 24 SDK extension's runtime rather than downloading a
+> Node binary. It explicitly prepares the FOMOD native dependency before
+> Electron's Linux native-module rebuild because the generated offline store
+> does not run that package's install hook.
 
 > [!NOTE]
 > **Prerequisites:** see [Flatpak packaging] for the basics and
@@ -40,11 +44,35 @@ virtual environment and can run from any directory.
 
 ### First-time Setup
 
-First ensure your submodules are up to date:
+Initialize submodules if the checkout uses them:
 
 ```bash
 git submodule update --init --recursive
 ```
+
+### Isolated Podman Build
+
+The container workflow keeps Flatpak remotes, SDKs, and build caches out of the
+desktop Flatpak installation. Rootless Podman needs `--privileged` to permit
+the nested `bwrap` sandbox used by Flatpak Builder; the container only mounts
+the repository and a dedicated cache directory.
+
+```bash
+podman build -f flatpak/Containerfile -t vortex-flatpak-builder .
+mkdir -p "$HOME/.cache/vortex-flatpak-builder"
+podman run --rm --privileged --userns=keep-id --user "$(id -u):$(id -g)" \
+  --security-opt label=disable \
+  -v "$PWD:/workspace" \
+  -v "$HOME/.cache/vortex-flatpak-builder:/flatpak-cache" \
+  -e HOME=/tmp \
+  -e XDG_DATA_HOME=/flatpak-cache/data \
+  -e XDG_CACHE_HOME=/flatpak-cache/cache \
+  -w /workspace vortex-flatpak-builder \
+  python3 flatpak/scripts/flatpak_build.py --disable-rofiles-fuse
+```
+
+The dedicated XDG paths are important: omitting them can use Flatpak remotes
+and runtimes from the host installation.
 
 ### Development Iteration
 
@@ -110,7 +138,7 @@ Current baselines:
 
 - Runtime: `org.freedesktop.Platform` 25.08
 - BaseApp: `org.electronjs.Electron2.BaseApp` 25.08
-- Node SDK: `org.freedesktop.Sdk.Extension.node22`
+- Node SDK: `org.freedesktop.Sdk.Extension.node24`
 - .NET SDK: `org.freedesktop.Sdk.Extension.dotnet9`
 
 ## generated-sources.json, generated-nuget-sources.json & Offline Build Behaviour
@@ -118,7 +146,7 @@ Current baselines:
 Flatpak builds run in offline mode inside the build sandbox.
 
 - `flatpak-builder` downloads sources up front:
-    - npm packages in `flatpak/generated-sources.json`
+    - pnpm packages in `flatpak/generated-sources.json`
     - NuGet packages in `flatpak/generated-nuget-sources.json`
 - build commands then run offline in the sandbox using those prefetched sources
 
@@ -126,9 +154,10 @@ This is required for _Flathub submission_ and ensures reproducible builds.
 
 To keep source files in sync automatically, build scripts now:
 
-- hash recursive repository `yarn.lock` files and compare against
+- hash `pnpm-lock.yaml` and compare against
   `flatpak/generated-sources.hash`
-- hash FOMOD `.csproj` and NuGet input files and compare against
+- hash .NET project files and NuGet inputs under `tools/dotnetprobe` and
+  compare against
   `flatpak/generated-nuget-sources.hash`
 - regenerate each generated source file only when needed
 
@@ -138,10 +167,10 @@ To sync both generated source files manually, run:
 python3 flatpak/scripts/flatpak_sources.py
 ```
 
-If you are debugging `generated-sources.json` generation, you can run the sync script manually:
+If you are debugging `generated-sources.json` generation, run:
 
 ```bash
-python3 flatpak/scripts/flatpak_sources.py --only yarn --force
+python3 flatpak/scripts/flatpak_sources.py --only pnpm --force
 ```
 
 If you are debugging `generated-nuget-sources.json` generation, run:
@@ -150,15 +179,20 @@ If you are debugging `generated-nuget-sources.json` generation, run:
 python3 flatpak/scripts/flatpak_sources.py --only nuget --force
 ```
 
-NuGet source syncing scans `extensions/` by default. Use `--search-root` if
-you need to narrow the scope during debugging.
+NuGet source syncing scans `tools/dotnetprobe/` by default. It installs the
+matching Flatpak SDK and .NET SDK extension into the current user's Flatpak
+installation before restoring projects. Use `--search-root` to narrow the
+scope during debugging.
 
 ## Troubleshooting
 
-- Missing submodule files during Flatpak build: `yarn install` normally runs
-  `preinstall.js`, which initializes submodules. If you have not run
-  `yarn install` locally, run `git submodule update --init --recursive`
-  first
+- pnpm reports that it cannot download Node during the offline install: the
+  manifest must use the Node 24 SDK extension matching the `24.22.2` runtime
+  required by the workspace.
+- FOMOD native build fails because `ModInstaller.Native.so` is missing: the
+  Flatpak build explicitly runs the package install hook before rebuilding
+  Linux Electron modules. Keep this step when changing the pnpm source
+  generator.
 - `nxm://` handler did not switch automatically:
 
 ```bash
@@ -179,8 +213,10 @@ xdg-settings set default-url-scheme-handler nxm com.nexusmods.vortex.dev.desktop
 - [flatpak-builder documentation]
 
 [Flatpak packaging]: ../packaging/flatpak.md
-[Flatpak builder tools issue 383]: https://github.com/flatpak/flatpak-builder-tools/issues/383
+[upstream issue 383]: https://github.com/flatpak/flatpak-builder-tools/issues/383
 [Flatpak Builder Tools PR 511]: https://github.com/flatpak/flatpak-builder-tools/pull/511
+[pnpm v11]: https://github.com/flatpak/flatpak-builder-tools/commit/ee65dc7a798be56de8c4c1ab73411461cac020b4
+[pnpm v12]: https://github.com/flatpak/flatpak-builder-tools/commit/74697c75b630d7330e77250fc13cb5ea688d9479
 [Flatpak .NET guide]: https://docs.flatpak.org/en/latest/dotnet.html
 [Flatpak Electron guide]: https://docs.flatpak.org/en/latest/electron.html
 [flatpak-builder documentation]: https://docs.flatpak.org/en/latest/flatpak-builder.html

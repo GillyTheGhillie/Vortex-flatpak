@@ -21,7 +21,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build the Vortex Flatpak using flatpak-builder."
     )
-    parser.parse_args()
+    parser.add_argument(
+        "--disable-rofiles-fuse",
+        action="store_true",
+        help="Disable rofiles-fuse (useful in containerized builds without FUSE)",
+    )
+    args = parser.parse_args()
 
     ensure_venv(install_packages=False)
     ensure_flatpak_tools()
@@ -37,6 +42,7 @@ def main() -> None:
         manifest=paths.manifest,
         install_deps_from="flathub",
         user_install=True,
+        disable_rofiles_fuse=args.disable_rofiles_fuse,
     )
 
 

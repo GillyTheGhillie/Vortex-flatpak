@@ -103,6 +103,7 @@ temp/
 
 # Flatpak
 .flatpak-builder/
+/build-flatpak/
 flatpak/.venv-flatpak/
 flatpak/flatpak-repo/
 

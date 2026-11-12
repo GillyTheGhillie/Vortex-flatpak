@@ -3,8 +3,11 @@
 Use this page when you need to build, install, or bundle the Flatpak package.
 
 > [!WARNING]
-> Flatpak is broken right now.
-> `pnpm` support in Flatpak still needs fixing.
+> Vortex's Flatpak source generation and build now use the repository's pnpm
+> lockfile. Upstream pnpm support was added in
+> [flatpak-builder-tools PR 511](https://github.com/flatpak/flatpak-builder-tools/pull/511).
+> See [Flatpak maintenance](../flatpak/maintenance.md) for the supported
+> container workflow and native-module details.
 
 ## Flatpak Basics (Linux Packaging)
 
@@ -28,6 +31,11 @@ These dependencies are only required if you are building the Flatpak package.
 > `flatpak-node-generator`, but the scripts in `flatpak/scripts/`
 > automatically install it for you. The Flathub remote is also added
 > automatically if missing.
+
+> [!TIP]
+> To keep Flatpak SDKs and remotes out of the desktop installation, use the
+> isolated rootless Podman workflow in
+> [Flatpak maintenance](../flatpak/maintenance.md#isolated-podman-build).
 
 ## First-Time Setup
 
