@@ -141,6 +141,13 @@ Current baselines:
 - Node SDK: `org.freedesktop.Sdk.Extension.node24`
 - .NET SDK: `org.freedesktop.Sdk.Extension.dotnet9`
 
+## Flatpak Versioning
+
+Every build writes a unique release version to `flatpak/com.nexusmods.vortex.metainfo.xml`,
+in the form `yyyy.mm.dd.hh.mm.ss-flatpak` (for example `2026.11.12.21.58.52-flatpak`),
+with the release date set to the same day. This stops rebuilds from being mistaken for an
+already-installed version. The app's own `package.json` version is unchanged.
+
 ## generated-sources.json, generated-nuget-sources.json & Offline Build Behaviour
 
 Flatpak builds run in offline mode inside the build sandbox.

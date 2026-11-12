@@ -1,21 +1,14 @@
 #!/usr/bin/env python3
-"""Update the metainfo.xml version from package.json using string replacement."""
+"""Update the metainfo.xml release version and date for each Flatpak build."""
 
-import json
 import re
 from datetime import datetime
 from pathlib import Path
 
 
-def get_version_from_package_json(repo_root: Path) -> str:
-    """Extract version from app/package.json (release version)."""
-    package_json = repo_root / "app" / "package.json"
-    if not package_json.exists():
-        # Fall back to root package.json for development
-        package_json = repo_root / "package.json"
-    with open(package_json, "r") as f:
-        data = json.load(f)
-    return data.get("version", "0.0.1")
+def make_flatpak_version(now: datetime) -> str:
+    """Build a unique, sortable version such as 2026.11.12.21.58.52-flatpak."""
+    return now.strftime("%Y.%m.%d.%H.%M.%S") + "-flatpak"
 
 
 def update_metainfo_version(repo_root: Path) -> None:
@@ -26,8 +19,9 @@ def update_metainfo_version(repo_root: Path) -> None:
         print(f"Warning: {metainfo_path} not found")
         return
 
-    version = get_version_from_package_json(repo_root)
-    today = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    version = make_flatpak_version(now)
+    today = now.strftime("%Y-%m-%d")
 
     with open(metainfo_path, "r") as f:
         content = f.read()
