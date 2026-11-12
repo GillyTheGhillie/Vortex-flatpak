@@ -160,8 +160,8 @@ function main(context: types.IExtensionContext) {
     setup: util.toBlue((discovery) => prepareForModding(context.api, discovery)),
     queryModPath: () => "Data Files",
     logo: "gameart.jpg",
-    executable: () => "morrowind.exe",
-    requiredFiles: ["morrowind.exe"],
+    executable: () => "Morrowind.exe",
+    requiredFiles: ["Morrowind.exe"],
     // requiresLauncher,
     environment: {
       SteamAPPId: STEAMAPP_ID,
