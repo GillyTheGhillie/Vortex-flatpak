@@ -26,6 +26,7 @@ build-options:
     npm_config_cache: /run/build/vortex/flatpak-node/npm-cache
     npm_config_nodedir: /usr/lib/sdk/node24
     npm_config_offline: "true"
+    PNPM_CONFIG_TRUST_LOCKFILE: "true"
     XDG_CACHE_HOME: /run/build/vortex/flatpak-node/cache
 
     # Dotnet SDK settings for build-time tools (runtime DOTNET_ROOT is set via finish-args).
@@ -162,6 +163,7 @@ modules:
 
         # Build targets only; lint and typecheck run in the regular CI pipeline.
         node .flatpak-pnpm/bin/pnpm.cjs nx run-many -t build --parallel=1
+        printf '%s\n' 'offline=true' 'trust-lockfile=true' 'ignore-scripts=true' > .npmrc
         node - <<'NODE'
         const fs = require('node:fs');
         const packagePath = 'src/main/package.json';
@@ -172,18 +174,24 @@ modules:
         }
         packageJson.scripts.publish = packageJson.scripts.publish.replace(
           expected,
-          'pnpm -F @vortex/main deploy --offline --trust-lockfile ./dist',
+          'pnpm -F @vortex/main deploy --offline --trust-lockfile --ignore-scripts ./dist',
         );
         fs.writeFileSync(packagePath, JSON.stringify(packageJson, null, 2) + '\n');
         NODE
-        NODE_ENV=production node .flatpak-pnpm/bin/pnpm.cjs nx run @vortex/main:publish
+        VORTEX_ELECTRON_REBUILD=defer NODE_ENV=production \
+          node .flatpak-pnpm/bin/pnpm.cjs nx run @vortex/main:publish
+        rm .npmrc
 
         # Rebuild the deployed native modules for Electron, then stage a
         # directory build of the application.
         (
           cd src/main/dist
-          PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false pnpm exec electron-rebuild --sequential
-          pnpm exec electron-builder \
+          node node_modules/@nexusmods/fomod-installer-native/install.js
+          test -f node_modules/@nexusmods/fomod-installer-native/ModInstaller.Native.so
+          node_modules/.bin/electron-rebuild \
+            --only @nexusmods/fomod-installer-native,drivelist,leveldown,xxhash-addon,@parcel/watcher \
+            --sequential
+          node_modules/.bin/electron-builder \
             --config electron-builder.config.json \
             --publish never --linux dir
         )
