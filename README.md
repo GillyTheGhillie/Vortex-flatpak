@@ -17,6 +17,12 @@ Vortex is the current mod manager from Nexus Mods. It is designed to make moddin
 
 Our approach with Vortex aims to take complex tasks such as sorting your load order or managing your mod files and automate as much of the process as possible with the goal of having you achieve a stable modded game with minimal effort. We want to help you spend less time modding and more time playing your games.
 
+## About This Fork
+
+This repository is a community modification of [Nexus Mods Vortex](https://github.com/Nexus-Mods/Vortex), maintained by [GillyTheGhillie](https://github.com/GillyTheGhillie). It adds and maintains Flatpak packaging and related build tooling; it is not an official Nexus Mods release.
+
+The original project is licensed under the [GNU General Public License v3.0](LICENSE.md). That license permits modification and redistribution subject to its terms. Please retain the original copyright and license notices and provide the corresponding source when redistributing. Vortex and its original code are credited to Nexus Mods and the upstream contributors; this fork's changes are maintained by GillyTheGhillie.
+
 ## Features
 
 - **Multi-game Support** - with mod support for over 250 different games and counting, Vortex is the most versatile mod manager available. This includes games such as [Skyrim](https://www.nexusmods.com/skyrimspecialedition), [Fallout 3](https://www.nexusmods.com/fallout3), [Fallout 4](https://www.nexusmods.com/fallout4), [Fallout: New Vegas](https://www.nexusmods.com/newvegas/), [Cyberpunk 2077](https://www.nexusmods.com/cyberpunk2077/), [Baldur's Gate 3](https://www.nexusmods.com/baldursgate3/), [Starfield](https://www.nexusmods.com/starfield/), [Stardew Valley](https://www.nexusmods.com/stardewvalley/), [Bannerlord](https://www.nexusmods.com/mountandblade2bannerlord), [Witcher 3](https://www.nexusmods.com/witcher3), [Elden Ring](https://www.nexusmods.com/eldenring), [The Sims 4](https://www.nexusmods.com/thesims4), [Monster Hunter: World](https://www.nexusmods.com/monsterhunterworld), [Oblivion](https://www.nexusmods.com/oblivion), [Palworld](https://www.nexusmods.com/palworld), [Blade & Sorcery](https://www.nexusmods.com/bladeandsorcery), [Valheim](https://www.nexusmods.com/valheim), [Hogwarts Legacy](https://www.nexusmods.com/hogwartslegacy/), [7 Days to Die](https://www.nexusmods.com/7daystodie/).
@@ -36,6 +42,65 @@ Our approach with Vortex aims to take complex tasks such as sorting your load or
 To get started, Vortex can be downloaded from [Nexus Mods](https://www.nexusmods.com/site/mods/1?tab=files) or from [GitHub](https://github.com/Nexus-Mods/Vortex/releases/latest). After the installer has been downloaded, just run it and follow the instructions.
 
 Additional information on Vortex and guides can be found in the [Vortex Wiki](https://github.com/Nexus-Mods/Vortex/wiki).
+
+## Build and Install the Flatpak
+
+The Flatpak can be built inside a Podman or Docker container so the build's Flatpak remotes, SDKs, and caches are isolated from the host's normal Flatpak installation. The commands below clone this fork, build the bundle, and then install it on the host only when you run the final command.
+
+Clone the repository and initialize its submodules:
+
+```bash
+git clone https://github.com/GillyTheGhillie/Vortex-flatpak.git
+cd Vortex-flatpak
+git submodule update --init --recursive
+```
+
+### Podman
+
+```bash
+podman build -f flatpak/Containerfile -t vortex-flatpak-builder .
+mkdir -p "$HOME/.cache/vortex-flatpak-builder"
+
+podman run --rm --privileged --userns=keep-id \
+  --user "$(id -u):$(id -g)" \
+  --security-opt label=disable \
+  -v "$PWD:/workspace" \
+  -v "$HOME/.cache/vortex-flatpak-builder:/flatpak-cache" \
+  -e HOME=/tmp \
+  -e XDG_DATA_HOME=/flatpak-cache/data \
+  -e XDG_CACHE_HOME=/flatpak-cache/cache \
+  -w /workspace vortex-flatpak-builder \
+  sh -eu -c 'python3 flatpak/scripts/flatpak_build.py --disable-rofiles-fuse &&
+    flatpak build-export --update-appstream flatpak/flatpak-repo build-flatpak &&
+    flatpak build-bundle flatpak/flatpak-repo build-flatpak/com.nexusmods.vortex.flatpak com.nexusmods.vortex'
+```
+
+### Docker
+
+```bash
+docker build -f flatpak/Containerfile -t vortex-flatpak-builder .
+mkdir -p "$HOME/.cache/vortex-flatpak-builder"
+
+docker run --rm --privileged \
+  --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace" \
+  -v "$HOME/.cache/vortex-flatpak-builder:/flatpak-cache" \
+  -e HOME=/tmp \
+  -e XDG_DATA_HOME=/flatpak-cache/data \
+  -e XDG_CACHE_HOME=/flatpak-cache/cache \
+  -w /workspace vortex-flatpak-builder \
+  sh -eu -c 'python3 flatpak/scripts/flatpak_build.py --disable-rofiles-fuse &&
+    flatpak build-export --update-appstream flatpak/flatpak-repo build-flatpak &&
+    flatpak build-bundle flatpak/flatpak-repo build-flatpak/com.nexusmods.vortex.flatpak com.nexusmods.vortex'
+```
+
+The bundle is created at `build-flatpak/com.nexusmods.vortex.flatpak`. To install it into your user Flatpak installation, run this command from the repository root on the host:
+
+```bash
+flatpak install --user --bundle ./build-flatpak/com.nexusmods.vortex.flatpak
+```
+
+Installation may download the required Flatpak runtime from a configured remote. Building does not install Vortex on the host.
 
 ## Resources
 
