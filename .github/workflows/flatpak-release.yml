@@ -1,0 +1,103 @@
+name: Flatpak Release
+
+# Builds the Vortex Flatpak bundle and attaches it to a draft GitHub release.
+# Pushing a version tag (for example v1.2.0) builds that tag. Running the workflow by
+# hand builds the branch you select and drafts a release for the tag you enter.
+#
+# The build runs in the Fedora container from flatpak/Containerfile, the same way the
+# README describes for local builds, so the runner needs no Flatpak packages of its own.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to draft (for example v1.2.0)."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-flatpak:
+    name: Build Flatpak bundle
+    runs-on: ubuntu-24.04
+    # A cold build of the full Vortex Flatpak takes well over an hour.
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Free runner disk space
+        # The hosted runner ships with roughly 25 GB of tools this build never uses.
+        # The Flatpak build needs about 15 GB of its own, so remove those first.
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$REF_NAME"
+          fi
+          case "$tag" in
+            v*) ;;
+            *) echo "Release tag must start with 'v', got '$tag'" >&2; exit 1 ;;
+          esac
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Build builder image
+        run: docker build -f flatpak/Containerfile -t vortex-flatpak-builder .
+
+      - name: Build and bundle the Flatpak
+        # --privileged lets flatpak-builder run its bwrap sandbox inside the container.
+        # The cache lives outside the checkout and is deleted with the runner.
+        run: |
+          mkdir -p "$RUNNER_TEMP/flatpak-cache"
+          docker run --rm --privileged \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -v "$RUNNER_TEMP/flatpak-cache:/flatpak-cache" \
+            -e HOME=/tmp \
+            -e XDG_DATA_HOME=/flatpak-cache/data \
+            -e XDG_CACHE_HOME=/flatpak-cache/cache \
+            -w /workspace \
+            vortex-flatpak-builder \
+            bash -euo pipefail -c '
+              python3 flatpak/scripts/flatpak_build.py --disable-rofiles-fuse
+              flatpak build-export --update-appstream flatpak/flatpak-repo build-flatpak
+              flatpak build-bundle flatpak/flatpak-repo build-flatpak/com.nexusmods.vortex.flatpak com.nexusmods.vortex
+            '
+
+      - name: Checksum the bundle
+        working-directory: build-flatpak
+        run: |
+          test -f com.nexusmods.vortex.flatpak
+          # GitHub release assets are limited to 2 GB each.
+          test "$(stat -c %s com.nexusmods.vortex.flatpak)" -lt 2147483648
+          sha256sum com.nexusmods.vortex.flatpak > com.nexusmods.vortex.flatpak.sha256
+          ls -lh com.nexusmods.vortex.flatpak*
+
+      - name: Draft GitHub release
+        uses: softprops/action-gh-release@v3.0.4
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Vortex Flatpak ${{ steps.tag.outputs.name }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            build-flatpak/com.nexusmods.vortex.flatpak
+            build-flatpak/com.nexusmods.vortex.flatpak.sha256
