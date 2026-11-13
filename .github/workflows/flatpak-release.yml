@@ -69,6 +69,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/flatpak-cache"
           docker run --rm --privileged \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
             -v "$GITHUB_WORKSPACE:/workspace" \
             -v "$RUNNER_TEMP/flatpak-cache:/flatpak-cache" \
             -e HOME=/tmp \
@@ -80,6 +81,9 @@ jobs:
               python3 flatpak/scripts/flatpak_build.py --disable-rofiles-fuse
               flatpak build-export --update-appstream flatpak/flatpak-repo build-flatpak
               flatpak build-bundle flatpak/flatpak-repo build-flatpak/com.nexusmods.vortex.flatpak com.nexusmods.vortex
+              # The container runs as root, so its output is root-owned on the runner.
+              # Hand the outputs back so the runner user can checksum and upload them.
+              chown -R "$HOST_UID:$HOST_GID" build-flatpak flatpak/flatpak-repo
             '
 
       - name: Checksum the bundle
