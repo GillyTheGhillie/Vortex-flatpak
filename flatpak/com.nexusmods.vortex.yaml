@@ -118,6 +118,11 @@ modules:
         chmod +x .flatpak-pnpm/bin/pnpm
         export PATH="$PWD/.flatpak-pnpm/bin:$PATH"
 
+        # The sandbox copies the whole working tree, including any node_modules left by a
+        # host install. Its pnpm store and install state differ, so pnpm would ask to purge
+        # them and abort without a TTY. Start from a clean dependency tree instead.
+        find . -name node_modules -type d -prune -exec rm -rf {} +
+
         # Use the exact Node version provided by the SDK instead of downloading
         # the runtime package during the offline install.
         node - <<'NODE'
