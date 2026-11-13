@@ -44,6 +44,13 @@ import {
   tierZeroCandidateId,
 } from "../util/detected_games/listableDetectedIds";
 import { locallyDetectedGames } from "../util/detected_games/locallyDetectedGames";
+import { byRecentlyUsed } from "../util/recentlyUsed";
+
+/**
+ * A tile on the page. One for a game nothing is registered for carries the extension the
+ * catalog has for it, to offer for download.
+ */
+type GameTile = IGameStored & { extension?: IAvailableExtension };
 
 const gameFromDiscovery = (id: string, discovered: IDiscoveryResult): IGameStored => ({
   id,
@@ -176,16 +183,6 @@ const GamePicker = ({
   const applyGameFilter = (game: IGameStored): boolean =>
     !currentFilterValue || game.name?.toLowerCase().includes(currentFilterValue.toLowerCase());
 
-  const lastUsed = (game: IGameStored): number =>
-    Math.max(
-      ...Object.values(profiles)
-        .filter((prof) => prof.gameId === game.id)
-        .map((prof) => prof.lastActivated),
-    );
-
-  const byRecentlyUsed = (lhs: IGameStored, rhs: IGameStored): number =>
-    lastUsed(rhs) - lastUsed(lhs);
-
   const lookupName = (input: string): string => {
     if (nameLookupRef.current[input] === undefined) {
       const exactMatch = nexusGames.find((i) => i.name === input);
@@ -220,7 +217,7 @@ const GamePicker = ({
 
   const sortBy = (sortMode: string) =>
     ({
-      recentlyused: byRecentlyUsed,
+      recentlyused: byRecentlyUsed(profiles),
       recent: byRecent,
       popular: byPopular,
     })[sortMode] ?? byGameName;
@@ -258,7 +255,7 @@ const GamePicker = ({
   );
 
   const managedGameList: IGameStored[] = [];
-  const supportedGameList: IGameStored[] = [];
+  const supportedGameList: GameTile[] = [];
 
   displayedGames.forEach((game: IGameStored) => {
     if (discoveredGames[game.id]?.path !== undefined) {
@@ -281,6 +278,7 @@ const GamePicker = ({
         requiredFiles: [],
         executable: undefined,
         contributed: isContributed(ext.author) ? ext.author : undefined,
+        extension: ext,
       }))
       .filter((ext) => showHidden || !(discoveredGames[ext.id]?.hidden ?? false)),
   );
@@ -307,8 +305,8 @@ const GamePicker = ({
   const favouriteGameIds: string[] = [];
   const detectedStores: Record<string, string> = {};
   const listedIds = new Set<string>();
-  const detectedGameList: IGameStored[] = detectedGames
-    .map<IGameStored | undefined>((game) => {
+  const detectedGameList: GameTile[] = detectedGames
+    .map<GameTile | undefined>((game) => {
       const nexusGame = nexusGameByNexusIdMap.get(game.gameId);
       if (nexusGame === undefined) {
         return undefined;
@@ -352,9 +350,11 @@ const GamePicker = ({
         imageURL: game.imageUrl,
         requiredFiles: [],
         executable: undefined,
+        // nothing registers the game: the response's extension is what Manage offers
+        extension: knownGames.some((known) => known.id === internalId) ? undefined : game.extension,
       };
     })
-    .filter((game): game is IGameStored => game !== undefined);
+    .filter((game): game is GameTile => game !== undefined);
 
   // Discovery adds the games the response can't name: ones on stores it doesn't cover
   // (Xbox, EA, Ubisoft), ones Nexus Mods doesn't list, such as an extension still in
