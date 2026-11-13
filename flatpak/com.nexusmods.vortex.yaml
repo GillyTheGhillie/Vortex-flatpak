@@ -196,6 +196,12 @@ modules:
           node_modules/.bin/electron-rebuild \
             --only @nexusmods/fomod-installer-native,drivelist,leveldown,xxhash-addon,@parcel/watcher \
             --sequential
+          # The addon's RPATH is the sandbox build directory, which is gone after install.
+          # Point it at the addon's own directory so ModInstaller.Native.so loads.
+          node ../../../flatpak/scripts/_flatpak_fomod_rpath.cjs \
+            node_modules/@nexusmods/fomod-installer-native/build/Release/modinstaller.node
+          readelf -d node_modules/@nexusmods/fomod-installer-native/build/Release/modinstaller.node \
+            | grep -q 'Library rpath: \[\$ORIGIN\]'
           node_modules/.bin/electron-builder \
             --config electron-builder.config.json \
             --publish never --linux dir
