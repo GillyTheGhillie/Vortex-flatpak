@@ -184,7 +184,7 @@ function main(context: types.IExtensionContext) {
     noCollectionGeneration: true,
     toggleableEntries: true,
     usageInstructions:
-      "Drag your plugins as needed - the game will load " + "load them from top to bottom.",
+      "Drag your plugins as needed - the game will load them from top to bottom.",
   });
 
   context.optional.registerCollectionFeature(
